@@ -339,6 +339,112 @@ app.all(['/server/heartbeat', '/servers/heartbeat'], (req, res) => {
 // This stops the annoying "favicon.ico" 404 errors in your logs
 app.get(['/favicon.ico', '/favicon.png'], (req, res) => res.status(204).end());
 
+// LANDING PAGE
+app.get('/', async (req, res) => {
+    try {
+        await connectDB();
+        
+        // Fetch Live Stats
+        const [totalPlayers, totalVehicles, totalOrgs, wealthData] = await Promise.all([
+            mongoose.model('Player').countDocuments(),
+            mongoose.model('Vehicle').countDocuments(),
+            mongoose.model('Organisation').countDocuments(),
+            mongoose.model('Player').aggregate([{ $group: { _id: null, total: { $sum: "$cash" } } }])
+        ]);
+
+        const cityWealth = wealthData[0] ? wealthData[0].total : 0;
+        const mongoState = mongoose.connection.readyState === 1;
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Northminster | Central API</title>
+                <script src="https://cdn.tailwindcss.com"></script>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+                <style>
+                    body { font-family: 'Inter', sans-serif; background-color: #030712; }
+                    .glass { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+                    .glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+                    .bg-gradient { background: radial-gradient(circle at top right, #1e293b, #030712); }
+                </style>
+            </head>
+            <body class="bg-gradient text-gray-100 min-h-screen flex flex-col">
+
+                <!-- Navigation -->
+                <nav class="w-full max-w-7xl mx-auto px-6 py-6 flex justify-between items-center">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-xl">N</div>
+                        <span class="text-xl font-extrabold tracking-tighter uppercase">Northminster</span>
+                    </div>
+                    <div class="hidden md:flex space-x-8 text-sm font-medium text-gray-400">
+                        <a href="/status" class="hover:text-white transition">Network Status</a>
+                        <a href="/graphql" class="hover:text-white transition">Developer API</a>
+                        <a href="#" class="hover:text-white transition">Documentation</a>
+                    </div>
+                    <a href="https://www.roblox.com" class="px-5 py-2 bg-white text-black rounded-full text-sm font-bold hover:bg-gray-200 transition">Enter City</a>
+                </nav>
+
+                <!-- Hero Section -->
+                <main class="flex-grow flex flex-col items-center justify-center px-6 text-center">
+                    <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold mb-6 uppercase tracking-widest">
+                        <span class="relative flex h-2 w-2">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                          <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                        </span>
+                        <span>Systems Nominal</span>
+                    </div>
+                    
+                    <h1 class="text-5xl md:text-7xl font-extrabold mb-4 tracking-tight">
+                        Central Data <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 italic">Intelligence</span>
+                    </h1>
+                    <p class="text-gray-400 max-w-xl text-lg mb-12">
+                        Powering the infrastructure of Northminster. Providing real-time synchronization between city services and the global registry.
+                    </p>
+
+                    <!-- Stats Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 w-full max-w-6xl">
+                        <div class="glass p-8 rounded-2xl text-left">
+                            <span class="text-gray-500 text-xs font-bold uppercase tracking-widest">Citizens</span>
+                            <div class="text-3xl font-bold mt-1">${totalPlayers.toLocaleString()}</div>
+                        </div>
+                        <div class="glass p-8 rounded-2xl text-left border-l-4 border-l-blue-500">
+                            <span class="text-gray-500 text-xs font-bold uppercase tracking-widest">City Wealth</span>
+                            <div class="text-3xl font-bold mt-1">£${cityWealth.toLocaleString()}</div>
+                        </div>
+                        <div class="glass p-8 rounded-2xl text-left">
+                            <span class="text-gray-500 text-xs font-bold uppercase tracking-widest">Registered Vehicles</span>
+                            <div class="text-3xl font-bold mt-1">${totalVehicles.toLocaleString()}</div>
+                        </div>
+                        <div class="glass p-8 rounded-2xl text-left">
+                            <span class="text-gray-500 text-xs font-bold uppercase tracking-widest">Active Orgs</span>
+                            <div class="text-3xl font-bold mt-1">${totalOrgs.toLocaleString()}</div>
+                        </div>
+                    </div>
+                </main>
+
+                <!-- Footer -->
+                <footer class="w-full max-w-7xl mx-auto px-6 py-12 mt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center text-gray-500 text-sm">
+                    <p>&copy; 2026 Northminster Development. Powered by Apollo & MongoDB.</p>
+                    <div class="flex space-x-6 mt-4 md:mt-0">
+                        <span class="flex items-center">
+                            <div class="w-2 h-2 rounded-full ${mongoState ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-red-500'} mr-2"></div>
+                            Database: ${mongoState ? 'CONNECTED' : 'OFFLINE'}
+                        </span>
+                        <a href="/graphql" class="hover:text-white transition underline">Endpoint API</a>
+                    </div>
+                </footer>
+
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        res.status(500).send("Critical System Error: " + err.message);
+    }
+});
+
 // 8. EXPORTS
 module.exports = app;
 
