@@ -8,7 +8,7 @@ async function startServer() {
 
     // 1. Database Connection
     // Replace with your actual MongoDB URI
-    const MONGO_URI = 'mongodb+srv://robloxuser:DatabasePassword1234@cluster0.h3szqtc.mongodb.net/?appName=Cluster0';
+    const MONGO_URI = 'mongodb+srv://DatabaseUser:VnKN00QhORmgEMo3@cluster0.h3szqtc.mongodb.net/?appName=Cluster0&authSource=admin';
     await mongoose.connect(MONGO_URI);
     console.log("✅ Connected to MongoDB!");
 
