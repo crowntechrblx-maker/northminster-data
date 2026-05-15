@@ -48,52 +48,80 @@ const mapId = (doc) => {
 // 4. GRAPHQL SCHEMA
 const typeDefs = gql`
   scalar ObjectID
+  scalar JSON
+
+  type RoleSet {
+    role: Int
+    salary: Int
+    permissions: [String]
+  }
+
   type Account { id: ObjectID, balance: Int }
-  type License { id: ObjectID, hasTheory: Boolean, categories: [JSON] }
-  type Player { id: ObjectID, roblox: String, cash: Int, account: Account, license: License, properties: [Property], vehicles: [Vehicle] }
-  type Organisation { id: ObjectID, name: String, bankAccount: Account }
+
+  type Organisation {
+    id: ObjectID
+    name: String
+    groupId: String
+    created: String
+    discoverable: Boolean
+    type: String
+    tag: String
+    customPermissions: [String]
+    roleSet: [RoleSet]
+    bankAccount: Account
+  }
+
+  type Player { 
+    id: ObjectID, roblox: String, cash: Int, account: Account, properties: [Property], vehicles: [Vehicle] 
+  }
+
   type Property { id: ObjectID, location: String }
   type Vehicle { id: ObjectID, model: String, numberPlate: String }
-  scalar JSON
-  input UpdatePlayerInput { cash: Int, inventory: [String] }
 
   type Query {
+    # Added 'group' argument to match Roblox request
     player(roblox: String, upsert: Boolean): Player
-    organisation(id: ObjectID, name: String): Organisation
-    organisations(groups: [String!]!): [Organisation] # ADDED
-    bankAccount(id: ObjectID!): Account              # ADDED
-    vehicle(id: ObjectID, numberPlate: String): Vehicle
+    organisation(id: ObjectID, name: String, group: String): Organisation
     status: String
   }
+
   type Mutation {
     updatePlayer(id: ObjectID!, updatePlayerInput: UpdatePlayerInput!): Player
   }
+  input UpdatePlayerInput { cash: Int, inventory: [String] }
 `;
+
 
 const resolvers = {
     Query: {
-        player: async (_, { roblox, upsert }) => {
+         player: async (_, { roblox, upsert }) => {
             await connectDB();
             let p = await Player.findOne({ roblox: String(roblox) });
             if (!p && upsert) {
-                const acc = await BankAccount.create({});
-                const lic = await License.create({});
-                p = await Player.create({ roblox: String(roblox), account: acc._id, license: lic._id, properties: [], vehicles: [] });
+                const acc = await BankAccount.create({ balance: 1000 });
+                p = await Player.create({ roblox: String(roblox), account: acc._id, cash: 500 });
             }
             if (!p) return null;
-            const data = await Player.findById(p._id).populate('account license properties vehicles');
-            const formatted = mapId(data);
-            if (formatted.account) formatted.account = mapId(formatted.account);
-            if (formatted.license) formatted.license = mapId(formatted.license);
-            if (formatted.properties) formatted.properties = formatted.properties.map(mapId);
-            if (formatted.vehicles) formatted.vehicles = formatted.vehicles.map(mapId);
-            return formatted;
+            const data = await Player.findById(p._id).populate('account properties vehicles');
+            return mapId(data);
         },
-        organisation: async (_, { id, name }) => {
+        organisation: async (_, { id, name, group }) => {
             await connectDB();
-            const query = id ? { _id: id } : { name };
+            const query = {};
+            if (id) query._id = id;
+            if (name) query.name = name;
+            if (group) query.groupId = group; // Maps 'group' from Roblox to 'groupId' in Mongo
+
             const org = await Organisation.findOne(query).populate('bankAccount');
-            return org ? mapId(org) : null;
+            if (!org) return null;
+
+            // Map IDs so Roblox doesn't crash
+            const formatted = mapId(org);
+            if (formatted.bankAccount) {
+                formatted.bankAccount = mapId(formatted.bankAccount);
+            }
+            
+            return formatted;
         },
 
         organisations: async (_, { groups }) => {
@@ -107,14 +135,13 @@ const resolvers = {
             const acc = await BankAccount.findById(id);
             return acc ? mapId(acc) : null;
         }
+        
     },
     Mutation: {
-        updatePlayer: async (_, { id, updatePlayerInput }) => {
+         updatePlayer: async (_, { id, updatePlayerInput }) => {
             await connectDB();
-            const p = await Player.findByIdAndUpdate(id, { $set: updatePlayerInput }, { new: true }).populate('account license');
-            const formatted = mapId(p);
-            if (formatted && formatted.account) formatted.account = mapId(formatted.account);
-            return formatted;
+            const p = await Player.findByIdAndUpdate(id, { $set: updatePlayerInput }, { new: true });
+            return mapId(p);
         }
     }
 };
