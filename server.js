@@ -1,19 +1,40 @@
+// At the top of your server.js
 require('dotenv').config();
 const express = require('express');
-const { ApolloServer, gql } = require('apollo-server-express');
 const mongoose = require('mongoose');
+const { ApolloServer } = require('apollo-server-express');
 
-// 1. INITIALIZE APP GLOBALLY
+// 1. GLOBAL CONNECTION CACHE
+// This prevents the "Buffering timed out" error on Vercel
+let isConnected = false;
+
+async function connectDB() {
+    if (isConnected) return;
+
+    // Vercel Integration uses MONGODB_URI
+    const uri = process.env.MONGODB_URI; 
+    
+    try {
+        const db = await mongoose.connect(uri, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000, // Fail fast so we can retry
+        });
+        isConnected = db.connections[0].readyState === 1;
+        console.log("✅ MongoDB Connected via Cache");
+    } catch (error) {
+        console.error("❌ MongoDB Connection Error:", error);
+    }
+}
+
 const app = express();
 app.use(express.json());
 
-// 2. DATABASE CONNECTION
-const MONGO_URI = process.env.MONGO_URI;
-if (MONGO_URI) {
-    mongoose.connect(MONGO_URI)
-        .then(() => console.log("✅ Connected to MongoDB!"))
-        .catch(err => console.error("❌ MongoDB Connection Error:", err));
-}
+// 2. ENSURE CONNECTION BEFORE EVERY REQUEST
+app.use(async (req, res, next) => {
+    await connectDB();
+    next();
+});
 
 // 3. MONGOOSE MODELS (Defined once at the top level)
 const Player = mongoose.models.Player || mongoose.model('Player', new mongoose.Schema({
