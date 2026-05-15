@@ -290,6 +290,18 @@ app.all('/auth/token', (req, res) => {
     });
 });
 
+// 4.5. HEARTBEAT ROUTE
+// This stops the 404 errors in your logs.
+app.post('/servers/heartbeat', (req, res) => {
+    // You can see the data Roblox is sending in your logs if you uncomment this:
+    // console.log("💓 Heartbeat from server:", req.body);
+    
+    res.status(200).json({
+        success: true,
+        message: "Heartbeat received"
+    });
+});
+
 // 5. APOLLO SETUP
 const server = new ApolloServer({ 
     typeDefs, 
