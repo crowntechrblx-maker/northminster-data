@@ -79,9 +79,11 @@ const typeDefs = gql`
   type Vehicle { id: ObjectID, model: String, numberPlate: String }
 
   type Query {
-    # Added 'group' argument to match Roblox request
     player(roblox: String, upsert: Boolean): Player
     organisation(id: ObjectID, name: String, group: String): Organisation
+    # FIXED: Added these two below to match the resolvers
+    organisations(groups: [String!]!): [Organisation]
+    bankAccount(id: ObjectID!): Account
     status: String
   }
 
@@ -110,12 +112,11 @@ const resolvers = {
             const query = {};
             if (id) query._id = id;
             if (name) query.name = name;
-            if (group) query.groupId = group; // Maps 'group' from Roblox to 'groupId' in Mongo
+            if (group) query.groupId = group;
 
             const org = await Organisation.findOne(query).populate('bankAccount');
             if (!org) return null;
 
-            // Map IDs so Roblox doesn't crash
             const formatted = mapId(org);
             if (formatted.bankAccount) {
                 formatted.bankAccount = mapId(formatted.bankAccount);
@@ -127,15 +128,19 @@ const resolvers = {
         organisations: async (_, { groups }) => {
             await connectDB();
             const list = await Organisation.find({ groupId: { $in: groups } }).populate('bankAccount');
-            return list.map(mapId);
+            return list.map(org => {
+                const formatted = mapId(org);
+                if (formatted.bankAccount) formatted.bankAccount = mapId(formatted.bankAccount);
+                return formatted;
+            });
         },
 
         bankAccount: async (_, { id }) => {
             await connectDB();
             const acc = await BankAccount.findById(id);
             return acc ? mapId(acc) : null;
-        }
-        
+        },
+        status: () => "OK"
     },
     Mutation: {
          updatePlayer: async (_, { id, updatePlayerInput }) => {
@@ -156,7 +161,7 @@ app.get('/status', async (req, res) => {
     res.send(`Database: ${state}`);
 });
 
-// 6. PORTAL PAGE (BritSov Style)
+// 6. PORTAL PAGE
 app.get('/', async (req, res) => {
     await connectDB();
     const [players, vehicles, orgs] = await Promise.all([Player.countDocuments(), Vehicle.countDocuments(), Organisation.countDocuments()]);
