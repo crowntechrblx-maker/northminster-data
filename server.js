@@ -71,6 +71,7 @@ const typeDefs = gql`
 
   type Mutation {
     updatePlayer(id: String!, updatePlayerInput: UpdatePlayerInput!): Player
+    createPlayer(roblox: String!): Player
     createOrganisation(input: JSON!): Organisation
     createVehicle(input: JSON!): Vehicle
     createProperty(input: JSON!): Property
@@ -111,10 +112,32 @@ const resolvers = {
         }
     },
     Mutation: {
-        updatePlayer: async (_, { id, updatePlayerInput }) => {
+         updatePlayer: async (_, { id, updatePlayerInput }) => {
             await connectDB();
-            return clean(await Player.findByIdAndUpdate(id, { $set: updatePlayerInput }, { new: true }).populate('account license'));
-        }
+            const p = await Player.findByIdAndUpdate(id, { $set: updatePlayerInput }, { new: true });
+            return format(p);
+        },
+          createPlayer: async (_, { roblox }) => {
+            await connectDB();
+            // Create sub-docs
+            const acc = await BankAccount.create({ balance: 1000 });
+            const lic = await License.create({ hasTheory: false, created: new Date().toISOString() });
+            
+            // Create player
+            const p = await Player.create({ 
+                roblox: String(roblox), 
+                account: acc._id, 
+                license: lic._id, 
+                cash: 500, 
+                created: new Date().toISOString(),
+                properties: [],
+                vehicles: []
+            });
+
+            // Return the full formatted object
+            const full = await Player.findById(p._id).populate('account license');
+            return format(full); // Use the clean/format helper we built
+        },
     }
 };
 
