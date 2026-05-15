@@ -228,6 +228,13 @@ app.use(async (req, res, next) => {
 
 // A beautiful status page to check your API health
 app.get('/status', async (req, res) => {
+    // Force a connection attempt before checking status
+    try {
+        await connectDB(); 
+    } catch (e) {
+        console.error("Status check connection failed", e);
+    }
+
     const mongoState = mongoose.connection.readyState;
     const states = {
         0: "🔴 Disconnected",
