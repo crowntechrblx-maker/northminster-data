@@ -182,14 +182,14 @@ async function startServer() {
         }
     };
 
-    // 5. THE AUTHENTICATION ROUTE (Required to fix Roblox 404/Timeout)
-    app.post('/auth/token', (req, res) => {
-        console.log(`Token issued for JobId: ${req.body.jobId}`);
-        res.status(200).json({
-            token: "authenticated_session", 
-            jobId: req.body.jobId || "studio"
-        });
+    // This allows both browser (GET) and Roblox (POST) to see the route
+app.all('/auth/token', (req, res) => {
+    console.log(`Token request received via ${req.method}`);
+    res.status(200).json({
+        token: "authenticated_session", 
+        jobId: req.body.jobId || "browser-test"
     });
+});
 
     const server = new ApolloServer({ 
         typeDefs, 
@@ -211,3 +211,5 @@ async function startServer() {
 }
 
 startServer();
+
+module.exports = app;
