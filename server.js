@@ -153,6 +153,8 @@ const typeDefs = gql`
     updatePlayer(id: ObjectID!, updatePlayerInput: UpdatePlayerInput!): Player
     createVehicle(createVehicleInput: CreateVehicleInput!): Vehicle
     createRecord(createRecordInput: CreateRecordInput!): Record
+    createProperty(createPropertyInput: CreatePropertyInput!): Property
+    sellProperty(id: ObjectID!): Boolean
   }
 `;
 
@@ -245,39 +247,34 @@ const resolvers = {
                 { $set: updatePlayerInput }, 
                 { new: true }
             ).populate('account license properties vehicles');
-
             if (!data) return null;
+            return { ...data._doc, id: data._id.toString() };
+        },
 
-            return {
-                ...data._doc,
-                id: data._id.toString(),
-                account: data.account ? { ...data.account._doc, id: data.account._id.toString() } : null,
-                license: data.license ? { ...data.license._doc, id: data.license._id.toString() } : null
-            };
+        createProperty: async (_, { createPropertyInput }) => {
+            const p = await Property.create({ 
+                ...createPropertyInput, 
+                created: new Date().toISOString(), 
+                active: true,
+                inventory: []
+            });
+            return { ...p._doc, id: p._id.toString() };
+        },
+
+        sellProperty: async (_, { id }) => {
+            await Property.findByIdAndDelete(id);
+            return true;
         },
 
         createVehicle: async (_, { createVehicleInput }) => {
             const v = await Vehicle.create({ ...createVehicleInput, created: new Date().toISOString() });
-            return {
-                ...v._doc,
-                id: v._id.toString()
-            };
-        },
-
-        createProperty: async (_, { createPropertyInput }) => {
-            const p = await Property.create({ ...createPropertyInput, created: new Date().toISOString(), active: true });
-            return { ...p._doc, id: p._id.toString() };
+            return { ...v._doc, id: v._id.toString() };
         },
 
         createRecord: async (_, { createRecordInput }) => {
             const r = await Record.create({ ...createRecordInput, created: new Date().toISOString() });
             const data = await Record.findById(r._id).populate('issuer subject');
             return { ...data._doc, id: data._id.toString() };
-        },
-
-        sellProperty: async (_, { id }) => {
-            await Property.findByIdAndDelete(id);
-            return true;
         }
     }
 };
