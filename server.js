@@ -207,12 +207,18 @@ player: async (_, { id, roblox }) => {
         }
     },
     Mutation: {
-        updatePlayer: async (_, { id, updatePlayerInput }) => {
-            return await Player.findByIdAndUpdate(id, updatePlayerInput, { new: true });
-        },
+       // In your Mutation resolvers in server.js
+updatePlayer: async (_, { id, updatePlayerInput }) => {
+    return await Player.findByIdAndUpdate(
+        id, 
+        { $set: updatePlayerInput }, // Use $set to update only provided fields
+        { new: true }
+    ).populate('account license properties vehicles');
+},
         createVehicle: async (_, { createVehicleInput }) => {
             return await Vehicle.create({ ...createVehicleInput, created: new Date().toISOString() });
         }
+        
     }
 };
 
