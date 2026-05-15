@@ -158,67 +158,127 @@ const typeDefs = gql`
 
 const resolvers = {
     Query: {
-    // Inside your resolvers = { Query: { ... } }
-player: async (_, { id, roblox }) => {
-    // 1. Try to find the player
-    let p = id ? await Player.findById(id) : await Player.findOne({ roblox });
+        player: async (_, { id, roblox }) => {
+            // 1. Try to find the player
+            let p = id ? await Player.findById(id) : await Player.findOne({ roblox });
 
-    // 2. If the player doesn't exist, create them AND their sub-data immediately
-    if (!p && roblox) {
-        console.log(`🆕 Auto-creating record for new player: ${roblox}`);
-        
-        // Create the supporting documents first
-        const newAcc = await BankAccount.create({ balance: 1000 });
-        const newLic = await License.create({ hasTheory: false });
+            // 2. If the player doesn't exist, create them AND their sub-data immediately
+            if (!p && roblox) {
+                console.log(`🆕 Auto-creating record for new player: ${roblox}`);
+                
+                const newAcc = await BankAccount.create({ balance: 1000 });
+                const newLic = await License.create({ hasTheory: false });
 
-        // Create the player with empty arrays for properties/vehicles to prevent crashes
-        p = await Player.create({ 
-            roblox: roblox, 
-            cash: 500, 
-            account: newAcc._id, 
-            license: newLic._id,
-            permissions: [],
-            inventory: [],
-            properties: [], // CRITICAL: Prevents "index nil" in PropertyService
-            vehicles: []    // CRITICAL: Prevents "index nil" in VehicleService
-        });
-    }
+                p = await Player.create({ 
+                    roblox: roblox, 
+                    cash: 500, 
+                    account: newAcc._id, 
+                    license: newLic._id,
+                    permissions: [],
+                    inventory: [],
+                    properties: [], 
+                    vehicles: []    
+                });
+            }
 
-    // 3. Return the player (new or old) with all data attached
-    if (!p) return null;
-    return await Player.findById(p._id).populate('account license properties vehicles');
-},
+            if (!p) return null;
+
+            // 3. Fetch full data
+            const data = await Player.findById(p._id).populate('account license properties vehicles');
+            if (!data) return null;
+
+            // THE FIX: Map _id to id for the main player and nested objects
+            return {
+                ...data._doc,
+                id: data._id.toString(),
+                account: data.account ? { ...data.account._doc, id: data.account._id.toString() } : null,
+                license: data.license ? { ...data.license._doc, id: data.license._id.toString() } : null,
+                // Map properties and vehicles arrays if they exist
+                properties: data.properties.map(prop => ({ ...prop._doc, id: prop._id.toString() })),
+                vehicles: data.vehicles.map(vh => ({ ...vh._doc, id: vh._id.toString() }))
+            };
+        },
+
         organisation: async (_, { id, name, group }) => {
             const query = {};
             if (id) query._id = id;
             if (name) query.name = name;
             if (group) query.groupId = group;
-            return await Organisation.findOne(query).populate('bankAccount');
+
+            const org = await Organisation.findOne(query).populate('bankAccount');
+            if (!org) return null;
+
+            return {
+                ...org._doc,
+                id: org._id.toString(),
+                bankAccount: org.bankAccount ? { ...org.bankAccount._doc, id: org.bankAccount._id.toString() } : null
+            };
         },
+
         vehicle: async (_, { id, numberPlate }) => {
-            return await Vehicle.findOne(id ? { _id: id } : { numberPlate }).populate('player property org');
+            const v = await Vehicle.findOne(id ? { _id: id } : { numberPlate }).populate('player property org');
+            if (!v) return null;
+
+            return {
+                ...v._doc,
+                id: v._id.toString()
+            };
         },
+
         records: async (_, { subject, type, take, skip }) => {
             const query = { subject };
             if (type) query.type = type;
             const items = await Record.find(query).limit(take || 10).skip(skip || 0).populate('issuer subject');
             const total = await Record.countDocuments(query);
-            return { records: items, total };
+            
+            return { 
+                records: items.map(item => ({ ...item._doc, id: item._id.toString() })), 
+                total 
+            };
         }
     },
+
     Mutation: {
-       // In your Mutation resolvers in server.js
-updatePlayer: async (_, { id, updatePlayerInput }) => {
-    return await Player.findByIdAndUpdate(
-        id, 
-        { $set: updatePlayerInput }, // Use $set to update only provided fields
-        { new: true }
-    ).populate('account license properties vehicles');
-},
+        updatePlayer: async (_, { id, updatePlayerInput }) => {
+            const data = await Player.findByIdAndUpdate(
+                id, 
+                { $set: updatePlayerInput }, 
+                { new: true }
+            ).populate('account license properties vehicles');
+
+            if (!data) return null;
+
+            return {
+                ...data._doc,
+                id: data._id.toString(),
+                account: data.account ? { ...data.account._doc, id: data.account._id.toString() } : null,
+                license: data.license ? { ...data.license._doc, id: data.license._id.toString() } : null
+            };
+        },
+
         createVehicle: async (_, { createVehicleInput }) => {
-            return await Vehicle.create({ ...createVehicleInput, created: new Date().toISOString() });
+            const v = await Vehicle.create({ ...createVehicleInput, created: new Date().toISOString() });
+            return {
+                ...v._doc,
+                id: v._id.toString()
+            };
+        },
+
+        createProperty: async (_, { createPropertyInput }) => {
+            const p = await Property.create({ ...createPropertyInput, created: new Date().toISOString(), active: true });
+            return { ...p._doc, id: p._id.toString() };
+        },
+
+        createRecord: async (_, { createRecordInput }) => {
+            const r = await Record.create({ ...createRecordInput, created: new Date().toISOString() });
+            const data = await Record.findById(r._id).populate('issuer subject');
+            return { ...data._doc, id: data._id.toString() };
+        },
+
+        sellProperty: async (_, { id }) => {
+            await Property.findByIdAndDelete(id);
+            return true;
         }
-        
     }
 };
 
