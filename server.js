@@ -195,7 +195,8 @@ async function startServer() {
         typeDefs, 
         resolvers, 
         introspection: true,
-        playground: true 
+        playground: true, 
+        cache: "bounded"
     });
 
     await server.start();
