@@ -2,7 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
-const { ApolloServer } = require('apollo-server-express');
+const { ApolloServer, gql } = require('apollo-server-express');
 
 // 1. GLOBAL CONNECTION CACHE
 // This prevents the "Buffering timed out" error on Vercel
