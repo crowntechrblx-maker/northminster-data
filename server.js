@@ -160,44 +160,40 @@ const typeDefs = gql`
 
 const resolvers = {
     Query: {
-        player: async (_, { id, roblox }) => {
-            // 1. Try to find the player
+        player: async (_, { id, roblox, upsert }) => {
+            // 1. Find or create the player
             let p = id ? await Player.findById(id) : await Player.findOne({ roblox });
 
-            // 2. If the player doesn't exist, create them AND their sub-data immediately
-            if (!p && roblox) {
-                console.log(`🆕 Auto-creating record for new player: ${roblox}`);
-                
+            if (!p && upsert && roblox) {
+                console.log(`🆕 Auto-creating Citizen: ${roblox}`);
                 const newAcc = await BankAccount.create({ balance: 1000 });
                 const newLic = await License.create({ hasTheory: false });
-
                 p = await Player.create({ 
-                    roblox: roblox, 
+                    roblox, 
                     cash: 500, 
                     account: newAcc._id, 
                     license: newLic._id,
-                    permissions: [],
-                    inventory: [],
-                    properties: [], 
-                    vehicles: []    
+                    properties: [],
+                    vehicles: [] 
                 });
             }
 
             if (!p) return null;
 
-            // 3. Fetch full data
+            // 2. Fetch full document with populations
             const data = await Player.findById(p._id).populate('account license properties vehicles');
-            if (!data) return null;
+            
+            // 3. THE "MAPPING" - This is what Roblox is looking for
+            // We convert the Mongoose document to a plain object and manually set 'id'
+            const playerObj = data.toObject();
 
-            // THE FIX: Map _id to id for the main player and nested objects
             return {
-                ...data._doc,
-                id: data._id.toString(),
-                account: data.account ? { ...data.account._doc, id: data.account._id.toString() } : null,
-                license: data.license ? { ...data.license._doc, id: data.license._id.toString() } : null,
-                // Map properties and vehicles arrays if they exist
-                properties: data.properties.map(prop => ({ ...prop._doc, id: prop._id.toString() })),
-                vehicles: data.vehicles.map(vh => ({ ...vh._doc, id: vh._id.toString() }))
+                ...playerObj,
+                id: data._id.toString(), // CRITICAL: This is the 'id' Roblox wants
+                account: playerObj.account ? { ...playerObj.account, id: playerObj.account._id.toString() } : null,
+                license: playerObj.license ? { ...playerObj.license, id: playerObj.license._id.toString() } : null,
+                properties: (playerObj.properties || []).map(prop => ({ ...prop, id: prop._id.toString() })),
+                vehicles: (playerObj.vehicles || []).map(v => ({ ...v, id: v._id.toString() }))
             };
         },
 
