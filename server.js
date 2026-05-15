@@ -8,8 +8,13 @@ async function startServer() {
 
     // 1. Database Connection
     // Using your provided connection string
-    const MONGO_URI = 'mongodb+srv://DatabaseUser:VnKN00QhORmgEMo3@cluster0.h3szqtc.mongodb.net/Northminster?retryWrites=true&w=majority';
-    
+    const MONGO_URI = process.env.MONGO_URI;
+
+    if (!MONGO_URI) {
+        console.error("❌ ERROR: MONGO_URI is not defined in environment variables!");
+        process.exit(1);
+    }
+
     mongoose.connect(MONGO_URI)
         .then(() => console.log("✅ Connected to MongoDB!"))
         .catch(err => console.error("❌ MongoDB Connection Error:", err));
