@@ -158,16 +158,36 @@ const typeDefs = gql`
 
 const resolvers = {
     Query: {
-        player: async (_, { id, roblox, upsert }) => {
-            let p = id ? await Player.findById(id) : await Player.findOne({ roblox });
-            if (!p && upsert && roblox) {
-                const newAcc = await BankAccount.create({ balance: 1000 });
-                const newLic = await License.create({ hasTheory: false });
-                p = await Player.create({ roblox, cash: 500, account: newAcc._id, license: newLic._id });
-            }
-            if (!p) return null;
-            return await Player.findById(p._id).populate('account license');
-        },
+    // Inside your resolvers = { Query: { ... } }
+player: async (_, { id, roblox }) => {
+    // 1. Try to find the player
+    let p = id ? await Player.findById(id) : await Player.findOne({ roblox });
+
+    // 2. If the player doesn't exist, create them AND their sub-data immediately
+    if (!p && roblox) {
+        console.log(`🆕 Auto-creating record for new player: ${roblox}`);
+        
+        // Create the supporting documents first
+        const newAcc = await BankAccount.create({ balance: 1000 });
+        const newLic = await License.create({ hasTheory: false });
+
+        // Create the player with empty arrays for properties/vehicles to prevent crashes
+        p = await Player.create({ 
+            roblox: roblox, 
+            cash: 500, 
+            account: newAcc._id, 
+            license: newLic._id,
+            permissions: [],
+            inventory: [],
+            properties: [], // CRITICAL: Prevents "index nil" in PropertyService
+            vehicles: []    // CRITICAL: Prevents "index nil" in VehicleService
+        });
+    }
+
+    // 3. Return the player (new or old) with all data attached
+    if (!p) return null;
+    return await Player.findById(p._id).populate('account license properties vehicles');
+},
         organisation: async (_, { id, name, group }) => {
             const query = {};
             if (id) query._id = id;
