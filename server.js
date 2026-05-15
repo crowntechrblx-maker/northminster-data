@@ -59,7 +59,11 @@ const typeDefs = gql`
 
   type Query {
     player(roblox: String, upsert: Boolean): Player
-    organisation(name: String): Organisation
+    organisation(id: ObjectID, name: String): Organisation
+    organisations(groups: [String!]!): [Organisation] # ADDED
+    bankAccount(id: ObjectID!): Account              # ADDED
+    vehicle(id: ObjectID, numberPlate: String): Vehicle
+    status: String
   }
   type Mutation {
     updatePlayer(id: ObjectID!, updatePlayerInput: UpdatePlayerInput!): Player
@@ -85,12 +89,23 @@ const resolvers = {
             if (formatted.vehicles) formatted.vehicles = formatted.vehicles.map(mapId);
             return formatted;
         },
-        organisation: async (_, { name }) => {
+        organisation: async (_, { id, name }) => {
             await connectDB();
-            const org = await Organisation.findOne({ name }).populate('bankAccount');
-            const formatted = mapId(org);
-            if (formatted && formatted.bankAccount) formatted.bankAccount = mapId(formatted.bankAccount);
-            return formatted;
+            const query = id ? { _id: id } : { name };
+            const org = await Organisation.findOne(query).populate('bankAccount');
+            return org ? mapId(org) : null;
+        },
+
+        organisations: async (_, { groups }) => {
+            await connectDB();
+            const list = await Organisation.find({ groupId: { $in: groups } }).populate('bankAccount');
+            return list.map(mapId);
+        },
+
+        bankAccount: async (_, { id }) => {
+            await connectDB();
+            const acc = await BankAccount.findById(id);
+            return acc ? mapId(acc) : null;
         }
     },
     Mutation: {
