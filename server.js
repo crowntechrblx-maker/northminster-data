@@ -287,18 +287,6 @@ app.all('/auth/token', (req, res) => {
     });
 });
 
-// 4.5. HEARTBEAT ROUTE
-// This stops the 404 errors in your logs.
-app.post('/servers/heartbeat', (req, res) => {
-    // You can see the data Roblox is sending in your logs if you uncomment this:
-    // console.log("💓 Heartbeat from server:", req.body);
-    
-    res.status(200).json({
-        success: true,
-        message: "Heartbeat received"
-    });
-});
-
 // 5. APOLLO SETUP
 const server = new ApolloServer({ 
     typeDefs, 
@@ -342,6 +330,14 @@ app.get('/status', async (req, res) => {
         </html>
     `);
 });
+
+// This handles singular, plural, GET, and POST all at once
+app.all(['/server/heartbeat', '/servers/heartbeat'], (req, res) => {
+    res.status(200).json({ success: true });
+});
+
+// This stops the annoying "favicon.ico" 404 errors in your logs
+app.get(['/favicon.ico', '/favicon.png'], (req, res) => res.status(204).end());
 
 // 8. EXPORTS
 module.exports = app;
