@@ -3,12 +3,11 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { ApolloServer, gql } = require('apollo-server-express');
 
-// 1. GLOBAL CONNECTION CACHE
+// 1. GLOBAL CONNECTION
 let isConnected = false;
 async function connectDB() {
     if (isConnected && mongoose.connection.readyState === 1) return;
     const uri = process.env.MONGODB_URI || process.env.MONGO_URI; 
-    if (!uri) return console.error("❌ MONGO_URI missing");
     try {
         await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
         isConnected = true;
@@ -19,11 +18,12 @@ async function connectDB() {
 const app = express();
 app.use(express.json());
 
-// 2. MONGOOSE MODELS
+// 2. MONGOOSE MODELS (Full Schema)
 const Player = mongoose.models.Player || mongoose.model('Player', new mongoose.Schema({
     roblox: { type: String, unique: true, required: true },
+    created: { type: String, default: () => new Date().toISOString() },
     cash: { type: Number, default: 500 },
-    inventory: [String],
+    inventory: { type: Array, default: [] },
     permissions: [{ name: String, source: String, canManage: Boolean }],
     account: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' },
     license: { type: mongoose.Schema.Types.ObjectId, ref: 'License' },
@@ -32,12 +32,12 @@ const Player = mongoose.models.Player || mongoose.model('Player', new mongoose.S
 }));
 
 const BankAccount = mongoose.models.BankAccount || mongoose.model('BankAccount', new mongoose.Schema({ balance: { type: Number, default: 1000 } }));
-const License = mongoose.models.License || mongoose.model('License', new mongoose.Schema({ hasTheory: { type: Boolean, default: false }, categories: [{ type: { type: String }, issued: String }] }));
-const Organisation = mongoose.models.Organisation || mongoose.model('Organisation', new mongoose.Schema({ name: String, groupId: String, discoverable: Boolean, bankAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' } }));
-const Vehicle = mongoose.models.Vehicle || mongoose.model('Vehicle', new mongoose.Schema({ numberPlate: String, model: String }));
-const Property = mongoose.models.Property || mongoose.model('Property', new mongoose.Schema({ location: String }));
+const License = mongoose.models.License || mongoose.model('License', new mongoose.Schema({ created: String, suspendedUntil: String, hasTheory: { type: Boolean, default: false }, categories: [{ type: { type: String }, issued: String }] }));
+const Organisation = mongoose.models.Organisation || mongoose.model('Organisation', new mongoose.Schema({ name: String, groupId: String, created: String, discoverable: Boolean, type: String, tag: String, customPermissions: [String], roleSet: [{ role: Number, salary: Number, permissions: [String] }], bankAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' } }));
+const Vehicle = mongoose.models.Vehicle || mongoose.model('Vehicle', new mongoose.Schema({ created: String, numberPlate: String, colour: String, make: String, model: String, year: Number, inventory: [String], player: { type: mongoose.Schema.Types.ObjectId, ref: 'Player' }, property: { type: mongoose.Schema.Types.ObjectId, ref: 'Property' } }));
+const Property = mongoose.models.Property || mongoose.model('Property', new mongoose.Schema({ created: String, location: String, active: Boolean, inventory: [String] }));
 
-// 3. ID MAPPING HELPER (Fixes the "Response missing ID mapping" error)
+// 3. ID MAPPING HELPER
 const mapId = (doc) => {
     if (!doc) return null;
     const obj = doc.toObject ? doc.toObject() : doc;
@@ -45,45 +45,47 @@ const mapId = (doc) => {
     return obj;
 };
 
-// 4. GRAPHQL SCHEMA
+// 4. FULL GRAPHQL SCHEMA (Matches your Roblox Queries 1:1)
 const typeDefs = gql`
   scalar ObjectID
   scalar JSON
 
-  type RoleSet {
-    role: Int
-    salary: Int
-    permissions: [String]
-  }
-
+  type RoleSet { role: Int, salary: Int, permissions: [String] }
+  type Permission { name: String, source: String, canManage: Boolean }
   type Account { id: ObjectID, balance: Int }
+  type Category { type: String, issued: String }
+
+  type License { 
+    id: ObjectID, created: String, suspendedUntil: String, 
+    hasTheory: Boolean, categories: [Category], endorsements: [String] 
+  }
 
   type Organisation {
-    id: ObjectID
-    name: String
-    groupId: String
-    created: String
-    discoverable: Boolean
-    type: String
-    tag: String
-    customPermissions: [String]
-    roleSet: [RoleSet]
-    bankAccount: Account
+    id: ObjectID, name: String, groupId: String, created: String, 
+    discoverable: Boolean, type: String, tag: String, 
+    customPermissions: [String], roleSet: [RoleSet], bankAccount: Account
   }
+
+  type Vehicle {
+    id: ObjectID, created: String, numberPlate: String, colour: String, 
+    make: String, model: String, year: Int, inventory: [String], 
+    player: Player, property: Property
+  }
+
+  type Property { id: ObjectID, created: String, location: String, active: Boolean, inventory: [String] }
 
   type Player { 
-    id: ObjectID, roblox: String, cash: Int, account: Account, properties: [Property], vehicles: [Vehicle] 
+    id: ObjectID, created: String, roblox: String, cash: Int, inventory: [JSON],
+    account: Account, permissions: [Permission], license: License,
+    properties: [Property], vehicles: [Vehicle]
   }
-
-  type Property { id: ObjectID, location: String }
-  type Vehicle { id: ObjectID, model: String, numberPlate: String }
 
   type Query {
     player(roblox: String, upsert: Boolean): Player
     organisation(id: ObjectID, name: String, group: String): Organisation
-    # FIXED: Added these two below to match the resolvers
     organisations(groups: [String!]!): [Organisation]
     bankAccount(id: ObjectID!): Account
+    vehicle(id: ObjectID, numberPlate: String): Vehicle
     status: String
   }
 
@@ -93,57 +95,51 @@ const typeDefs = gql`
   input UpdatePlayerInput { cash: Int, inventory: [String] }
 `;
 
-
 const resolvers = {
     Query: {
-         player: async (_, { roblox, upsert }) => {
+        player: async (_, { roblox, upsert }) => {
             await connectDB();
             let p = await Player.findOne({ roblox: String(roblox) });
             if (!p && upsert) {
-                const acc = await BankAccount.create({ balance: 1000 });
-                p = await Player.create({ roblox: String(roblox), account: acc._id, cash: 500 });
+                const acc = await BankAccount.create({});
+                const lic = await License.create({ created: new Date().toISOString() });
+                p = await Player.create({ roblox: String(roblox), account: acc._id, license: lic._id, created: new Date().toISOString() });
             }
             if (!p) return null;
-            const data = await Player.findById(p._id).populate('account properties vehicles');
-            return mapId(data);
+            const data = await Player.findById(p._id).populate('account license properties vehicles');
+            const res = mapId(data);
+            if (res.account) res.account = mapId(res.account);
+            if (res.license) res.license = mapId(res.license);
+            res.properties = (res.properties || []).map(mapId);
+            res.vehicles = (res.vehicles || []).map(mapId);
+            return res;
         },
         organisation: async (_, { id, name, group }) => {
             await connectDB();
-            const query = {};
-            if (id) query._id = id;
-            if (name) query.name = name;
-            if (group) query.groupId = group;
-
-            const org = await Organisation.findOne(query).populate('bankAccount');
+            const q = id ? { _id: id } : (group ? { groupId: group } : { name });
+            const org = await Organisation.findOne(q).populate('bankAccount');
             if (!org) return null;
-
-            const formatted = mapId(org);
-            if (formatted.bankAccount) {
-                formatted.bankAccount = mapId(formatted.bankAccount);
-            }
-            
-            return formatted;
+            const res = mapId(org);
+            if (res.bankAccount) res.bankAccount = mapId(res.bankAccount);
+            return res;
         },
-
         organisations: async (_, { groups }) => {
             await connectDB();
             const list = await Organisation.find({ groupId: { $in: groups } }).populate('bankAccount');
-            return list.map(org => {
-                const formatted = mapId(org);
-                if (formatted.bankAccount) formatted.bankAccount = mapId(formatted.bankAccount);
-                return formatted;
+            return list.map(o => {
+                const r = mapId(o);
+                if (r.bankAccount) r.bankAccount = mapId(r.bankAccount);
+                return r;
             });
         },
-
         bankAccount: async (_, { id }) => {
             await connectDB();
-            const acc = await BankAccount.findById(id);
-            return acc ? mapId(acc) : null;
+            return mapId(await BankAccount.findById(id));
         },
         status: () => "OK"
     },
     Mutation: {
-         updatePlayer: async (_, { id, updatePlayerInput }) => {
+        updatePlayer: async (_, { id, updatePlayerInput }) => {
             await connectDB();
             const p = await Player.findByIdAndUpdate(id, { $set: updatePlayerInput }, { new: true });
             return mapId(p);
@@ -154,41 +150,10 @@ const resolvers = {
 // 5. ROUTES
 app.all('/auth/token', (req, res) => res.json({ token: "authenticated_session", jobId: req.body.jobId }));
 app.all(['/server/heartbeat', '/servers/heartbeat'], (req, res) => res.json({ success: true }));
+app.get('/status', async (req, res) => { await connectDB(); res.send(`Database: ${mongoose.connection.readyState === 1 ? "CONNECTED" : "DISCONNECTED"}`); });
+app.get('/', (req, res) => res.redirect('/status'));
 
-app.get('/status', async (req, res) => {
-    await connectDB();
-    const state = mongoose.connection.readyState === 1 ? "CONNECTED" : "DISCONNECTED";
-    res.send(`Database: ${state}`);
-});
-
-// 6. PORTAL PAGE
-app.get('/', async (req, res) => {
-    await connectDB();
-    const [players, vehicles, orgs] = await Promise.all([Player.countDocuments(), Vehicle.countDocuments(), Organisation.countDocuments()]);
-    res.send(`
-        <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Northminster | Central API</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
-        <style>body{font-family:'Inter',sans-serif;background-color:#030712;}.glass{background:rgba(17,24,39,0.7);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.1);}</style></head>
-        <body class="text-gray-100 min-h-screen flex flex-col justify-center items-center px-6">
-            <div class="w-full max-w-5xl text-center">
-                <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold mb-8 uppercase tracking-widest">
-                    <span class="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span><span>API Systems Nominal</span>
-                </div>
-                <h1 class="text-6xl font-extrabold mb-6 tracking-tighter">Northminster <span class="italic text-blue-500">Registry</span></h1>
-                <p class="text-gray-400 text-lg mb-12 max-w-2xl mx-auto">Central data synchronization powering the city of Northminster.</p>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-                    <div class="glass p-8 rounded-3xl"><span class="text-gray-500 text-xs font-bold uppercase">Citizens</span><div class="text-4xl font-bold mt-2">${players}</div></div>
-                    <div class="glass p-8 rounded-3xl border-l-4 border-blue-500"><span class="text-gray-500 text-xs font-bold uppercase">Vehicles</span><div class="text-4xl font-bold mt-2">${vehicles}</div></div>
-                    <div class="glass p-8 rounded-3xl"><span class="text-gray-500 text-xs font-bold uppercase">Organisations</span><div class="text-4xl font-bold mt-2">${orgs}</div></div>
-                </div>
-                <div class="mt-12 text-gray-600 text-sm">© 2026 Northminster Development. Database: ${mongoose.connection.readyState === 1 ? 'ONLINE' : 'OFFLINE'}</div>
-            </div>
-        </body></html>
-    `);
-});
-
-// 7. APOLLO STARTUP
+// APOLLO STARTUP
 const server = new ApolloServer({ typeDefs, resolvers, introspection: true, cache: "bounded" });
 let started = false;
 app.use(async (req, res, next) => {
@@ -197,4 +162,4 @@ app.use(async (req, res, next) => {
 });
 
 module.exports = app;
-if (process.env.NODE_ENV !== 'production') app.listen(4000, () => console.log("🚀 Local: 4000"));
+if (process.env.NODE_ENV !== 'production') app.listen(4000);
