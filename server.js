@@ -10,7 +10,7 @@ async function startServer() {
     // Replace with your actual MongoDB URI
     const MONGO_URI = 'mongodb+srv://robloxuser:DatabasePassword1234@cluster0.h3szqtc.mongodb.net/?appName=Cluster0';
     await mongoose.connect(MONGO_URI);
-    console.log("✅ Connected to MongoDB");
+    console.log("✅ Connected to MongoDB!");
 
     // 2. Mongoose Schemas & Models
     const PlayerSchema = new mongoose.Schema({
