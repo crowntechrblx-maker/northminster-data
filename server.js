@@ -1,27 +1,32 @@
-// At the top of your server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const { ApolloServer, gql } = require('apollo-server-express');
 
 // 1. GLOBAL CONNECTION CACHE
-// This prevents the "Buffering timed out" error on Vercel
+// Optimized for Vercel Serverless to prevent "Buffering Timed Out"
 let isConnected = false;
 
 async function connectDB() {
-    if (isConnected) return;
+    if (isConnected && mongoose.connection.readyState === 1) {
+        return;
+    }
 
-    // Vercel Integration uses MONGODB_URI
-    const uri = process.env.MONGODB_URI; 
+    // Vercel Integration uses MONGODB_URI by default
+    const uri = process.env.MONGODB_URI || process.env.MONGO_URI; 
     
+    if (!uri) {
+        console.error("❌ MONGO_URI is missing from environment variables!");
+        return;
+    }
+
     try {
+        // REMOVED: useNewUrlParser and useUnifiedTopology (No longer supported in new drivers)
         const db = await mongoose.connect(uri, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-            serverSelectionTimeoutMS: 5000, // Fail fast so we can retry
+            serverSelectionTimeoutMS: 5000, 
         });
         isConnected = db.connections[0].readyState === 1;
-        console.log("✅ MongoDB Connected via Cache");
+        console.log("✅ MongoDB Connected");
     } catch (error) {
         console.error("❌ MongoDB Connection Error:", error);
     }
@@ -30,13 +35,7 @@ async function connectDB() {
 const app = express();
 app.use(express.json());
 
-// 2. ENSURE CONNECTION BEFORE EVERY REQUEST
-app.use(async (req, res, next) => {
-    await connectDB();
-    next();
-});
-
-// 3. MONGOOSE MODELS (Defined once at the top level)
+// 2. MONGOOSE MODELS
 const Player = mongoose.models.Player || mongoose.model('Player', new mongoose.Schema({
     roblox: { type: String, unique: true },
     created: { type: String, default: () => new Date().toISOString() },
@@ -103,10 +102,9 @@ const Record = mongoose.models.Record || mongoose.model('Record', new mongoose.S
     charges: [{ name: String, time: Number, payment: Number }]
 }));
 
-// 4. GRAPHQL SCHEMA
+// 3. GRAPHQL SCHEMA
 const typeDefs = gql`
   scalar ObjectID
-
   input CreateFlagInput { expires: String, reason: String, playerSubject: ObjectID, vehicleSubject: ObjectID, issuer: ObjectID }
   input CreateOrganisationInput { name: String, groupId: String, type: String, tag: String }
   input UpdatePlayerInput { cash: Int, inventory: [String] }
@@ -198,16 +196,15 @@ const resolvers = {
     }
 };
 
-// 5. THE AUTHENTICATION ROUTE (Must be before Apollo Middleware)
+// 4. AUTH ROUTE
 app.all('/auth/token', (req, res) => {
-    console.log(`Token request received via ${req.method}`);
     res.status(200).json({
         token: "authenticated_session", 
         jobId: req.body.jobId || "studio"
     });
 });
 
-// 6. APOLLO SETUP
+// 5. APOLLO SETUP
 const server = new ApolloServer({ 
     typeDefs, 
     resolvers, 
@@ -215,9 +212,10 @@ const server = new ApolloServer({
     cache: "bounded"
 });
 
-// For Serverless: Ensure server is started before handling requests
+// 6. MIDDLEWARE (Ensures DB & Apollo are ready)
 let apolloStarted = false;
 app.use(async (req, res, next) => {
+    await connectDB();
     if (!apolloStarted) {
         await server.start();
         server.applyMiddleware({ app, path: '/graphql' });
@@ -226,66 +224,34 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// A beautiful status page to check your API health
+// 7. STATUS PAGE
 app.get('/status', async (req, res) => {
-    // Force a connection attempt before checking status
-    try {
-        await connectDB(); 
-    } catch (e) {
-        console.error("Status check connection failed", e);
-    }
-
+    await connectDB();
     const mongoState = mongoose.connection.readyState;
-    const states = {
-        0: "🔴 Disconnected",
-        1: "🟢 Connected",
-        2: "🟡 Connecting",
-        3: "🟠 Disconnecting"
-    };
-
+    const states = { 0: "🔴 Disconnected", 1: "🟢 Connected", 2: "🟡 Connecting", 3: "🟠 Disconnecting" };
     const statusColor = mongoState === 1 ? "#00ff88" : "#ff4444";
 
     res.send(`
         <html>
-            <head>
-                <title>Northminster API Status</title>
-                <style>
-                    body { font-family: 'Segoe UI', sans-serif; background: #0b0e14; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .card { background: #161b22; padding: 2rem; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; width: 350px; }
-                    h1 { margin-top: 0; font-size: 1.5rem; color: #8b949e; }
-                    .status-dot { height: 15px; width: 15px; background-color: ${statusColor}; border-radius: 50%; display: inline-block; margin-right: 10px; box-shadow: 0 0 10px ${statusColor}; }
-                    .state-text { font-size: 1.2rem; font-weight: bold; }
-                    .info { margin-top: 20px; font-size: 0.9rem; color: #8b949e; border-top: 1px solid #30363d; padding-top: 20px; }
-                    .refresh { margin-top: 20px; display: inline-block; padding: 8px 16px; background: #238636; color: white; text-decoration: none; border-radius: 6px; font-size: 0.8rem; }
-                </style>
-                <meta http-equiv="refresh" content="30">
-            </head>
-            <body>
-                <div class="card">
-                    <h1>System Status</h1>
-                    <div style="display: flex; align-items: center; justify-content: center;">
-                        <span class="status-dot"></span>
-                        <span class="state-text">${states[mongoState] || "Unknown"}</span>
-                    </div>
-                    <div class="info">
-                        <p><strong>Endpoint:</strong> northminsterapi.jacobc.space</p>
-                        <p><strong>Database:</strong> MongoDB Atlas</p>
-                        <p><strong>Latency:</strong> Active</p>
-                    </div>
-                    <a href="/status" class="refresh">Refresh Status</a>
-                </div>
-            </body>
+            <head><title>Northminster API Status</title><style>
+                body { font-family: sans-serif; background: #0b0e14; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .card { background: #161b22; padding: 2rem; border-radius: 12px; border: 1px solid #30363d; text-align: center; width: 350px; }
+                .status-dot { height: 15px; width: 15px; background-color: ${statusColor}; border-radius: 50%; display: inline-block; margin-right: 10px; box-shadow: 0 0 10px ${statusColor}; }
+            </style></head>
+            <body><div class="card">
+                <h1>System Status</h1>
+                <p><span class="status-dot"></span><strong>${states[mongoState]}</strong></p>
+                <p style="color: #8b949e;">northminsterapi.jacobc.space</p>
+                <a href="/status" style="color: #00ff88; text-decoration: none;">Refresh</a>
+            </div></body>
         </html>
     `);
 });
 
-// 7. EXPORT APP FOR VERCEL
+// 8. EXPORTS
 module.exports = app;
 
-// 8. LOCAL LISTENING (Only if not on Vercel)
 if (process.env.NODE_ENV !== 'production') {
-    const PORT = process.env.PORT || 4000;
-    app.listen(PORT, () => {
-        console.log(`🚀 API running on port ${PORT}`);
-    });
+    const PORT = 4000;
+    app.listen(PORT, () => console.log(`🚀 Local at http://localhost:${PORT}`));
 }
