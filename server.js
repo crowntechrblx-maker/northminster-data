@@ -1,5 +1,5 @@
-const { ApolloServer, gql } = require('apollo-server-express');
 const express = require('express');
+const { ApolloServer, gql } = require('apollo-server-express');
 const mongoose = require('mongoose');
 
 async function startServer() {
@@ -7,23 +7,33 @@ async function startServer() {
     app.use(express.json());
 
     // 1. Database Connection
-    // Replace with your actual MongoDB URI
-    const MONGO_URI = 'mongodb+srv://DatabaseUser:VnKN00QhORmgEMo3@cluster0.h3szqtc.mongodb.net/?appName=Cluster0&authSource=admin';
-    await mongoose.connect(MONGO_URI);
-    console.log("✅ Connected to MongoDB!");
+    // Using your provided connection string
+    const MONGO_URI = 'mongodb+srv://DatabaseUser:VnKN00QhORmgEMo3@cluster0.h3szqtc.mongodb.net/Northminster?retryWrites=true&w=majority';
+    
+    mongoose.connect(MONGO_URI)
+        .then(() => console.log("✅ Connected to MongoDB!"))
+        .catch(err => console.error("❌ MongoDB Connection Error:", err));
 
-    // 2. Mongoose Schemas & Models
-    const PlayerSchema = new mongoose.Schema({
+    // 2. Mongoose Models
+    const Player = mongoose.model('Player', new mongoose.Schema({
         roblox: { type: String, unique: true },
         created: { type: String, default: () => new Date().toISOString() },
         cash: { type: Number, default: 0 },
         inventory: [String],
         permissions: [{ name: String, source: String, canManage: Boolean }],
-        account: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' }
-    });
-    const Player = mongoose.model('Player', PlayerSchema);
+        account: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' },
+        license: { type: mongoose.Schema.Types.ObjectId, ref: 'License' }
+    }));
 
-    const OrgSchema = new mongoose.Schema({
+    const License = mongoose.model('License', new mongoose.Schema({
+        created: { type: String, default: () => new Date().toISOString() },
+        suspendedUntil: String,
+        hasTheory: { type: Boolean, default: false },
+        endorsements: [String],
+        categories: [{ type: { type: String }, issued: String }]
+    }));
+
+    const Organisation = mongoose.model('Organisation', new mongoose.Schema({
         name: String,
         groupId: String,
         created: String,
@@ -33,10 +43,9 @@ async function startServer() {
         customPermissions: [String],
         roleSet: [{ role: String, salary: Number, permissions: [String] }],
         bankAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' }
-    });
-    const Organisation = mongoose.model('Organisation', OrgSchema);
+    }));
 
-    const VehicleSchema = new mongoose.Schema({
+    const Vehicle = mongoose.model('Vehicle', new mongoose.Schema({
         numberPlate: { type: String, unique: true },
         make: String,
         model: String,
@@ -47,8 +56,7 @@ async function startServer() {
         player: { type: mongoose.Schema.Types.ObjectId, ref: 'Player' },
         org: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation' },
         property: { type: mongoose.Schema.Types.ObjectId, ref: 'Property' }
-    });
-    const Vehicle = mongoose.model('Vehicle', VehicleSchema);
+    }));
 
     const BankAccount = mongoose.model('BankAccount', new mongoose.Schema({
         balance: { type: Number, default: 0 },
@@ -65,24 +73,25 @@ async function startServer() {
         created: String
     }));
 
-    // 3. GraphQL Schema (The "Contract")
+    const Record = mongoose.model('Record', new mongoose.Schema({
+        created: { type: String, default: () => new Date().toISOString() },
+        type: String,
+        issuer: { type: mongoose.Schema.Types.ObjectId, ref: 'Player' },
+        subject: { type: mongoose.Schema.Types.ObjectId, ref: 'Player' },
+        charges: [{ name: String, time: Number, payment: Number }]
+    }));
+
+    // 3. GraphQL Schema
     const typeDefs = gql`
       scalar ObjectID
 
-      # Inputs defined in your Roblox scripts
       input CreateFlagInput { expires: String, reason: String, playerSubject: ObjectID, vehicleSubject: ObjectID, issuer: ObjectID }
-      input CreateMarkerInput { reason: String, vehicleSubject: ObjectID, issuer: ObjectID }
       input CreateOrganisationInput { name: String, groupId: String, type: String, tag: String }
-      input UpdateOrganisationInput { id: ObjectID, discoverable: Boolean, tag: String }
       input UpdatePlayerInput { cash: Int, inventory: [String] }
       input CreatePropertyInput { location: String, player: ObjectID, org: ObjectID }
-      input UpdatePropertyInput { id: ObjectID, active: Boolean, inventory: [String] }
       input CreateRecordInput { type: String, issuer: ObjectID, subject: ObjectID, charges: [ChargeInput] }
       input ChargeInput { name: String, time: Int, payment: Int }
-      input CreateTransactionInput { from: ObjectID, to: ObjectID, amount: Int, type: String }
       input CreateVehicleInput { numberPlate: String, make: String, model: String, year: Int, player: ObjectID, org: ObjectID }
-      input UpdateVehicleInput { id: ObjectID, colour: String, inventory: [String] }
-      input CreateCmdrLogInput { command: String, userId: String }
 
       type Charge { name: String, time: Int, payment: Int }
       type RoleSet { role: String, salary: Int, permissions: [String] }
@@ -105,52 +114,40 @@ async function startServer() {
       }
 
       type Property { id: ObjectID, created: String, location: String, active: Boolean, inventory: [String], player: Player, org: Organisation }
-      
       type Record { id: ObjectID, created: String, type: String, issuer: Player, subject: Player, charges: [Charge] }
       type RecordConnection { records: [Record], total: Int }
-
       type License { id: ObjectID, created: String, suspendedUntil: String, hasTheory: Boolean, endorsements: [String], categories: [LicenseCategory] }
       type LicenseCategory { type: String, issued: String }
 
       type Query {
         player(id: ObjectID, roblox: String, upsert: Boolean): Player
-        players(id: ObjectID): [Player]
         organisation(id: ObjectID, name: String, group: String): Organisation
-        organisations(groups: [String!]!): [Organisation]
         vehicle(id: ObjectID, numberPlate: String): Vehicle
-        vehicles(take: Int, skip: Int, player: ObjectID, org: ObjectID, property: ObjectID): VehicleConnection
         property(id: ObjectID!): Property
         records(subject: ObjectID, type: String, take: Int, skip: Int): RecordConnection
         bankAccount(id: ObjectID!): Account
       }
 
-      type VehicleConnection { vehicles: [Vehicle], total: Int, makes: [MakeInfo] }
-      type MakeInfo { name: String, models: [String] }
-
       type Mutation {
         createOrganisation(createOrganisationInput: CreateOrganisationInput!): Organisation
-        updateOrganisation(updateOrganisationInput: UpdateOrganisationInput!): Organisation
         updatePlayer(id: ObjectID!, updatePlayerInput: UpdatePlayerInput!): Player
         createVehicle(createVehicleInput: CreateVehicleInput!): Vehicle
-        updateVehicle(updateVehicleInput: UpdateVehicleInput!): Vehicle
-        createProperty(createPropertyInput: CreatePropertyInput!): Property
-        sellProperty(id: ObjectID!): Boolean
         createRecord(createRecordInput: CreateRecordInput!): Record
-        createCmdrLog(createCmdrLogInput: CreateCmdrLogInput!): CmdrLogResult
       }
-
-      type CmdrLogResult { id: ObjectID }
     `;
 
-    // 4. Resolvers (Logic)
+    // 4. Resolvers
     const resolvers = {
         Query: {
             player: async (_, { id, roblox, upsert }) => {
                 let p = id ? await Player.findById(id) : await Player.findOne({ roblox });
                 if (!p && upsert && roblox) {
-                    p = await Player.create({ roblox, cash: 500 }); // Starting cash
+                    const newAcc = await BankAccount.create({ balance: 1000 });
+                    const newLic = await License.create({ hasTheory: false });
+                    p = await Player.create({ roblox, cash: 500, account: newAcc._id, license: newLic._id });
                 }
-                return p;
+                // Important: Populate nested fields that Roblox scripts look for
+                return await Player.findById(p._id).populate('account license');
             },
             organisation: async (_, { id, name, group }) => {
                 const query = {};
@@ -160,42 +157,51 @@ async function startServer() {
                 return await Organisation.findOne(query).populate('bankAccount');
             },
             vehicle: async (_, { id, numberPlate }) => {
-                return await Vehicle.findOne(id ? { _id: id } : { numberPlate });
+                return await Vehicle.findOne(id ? { _id: id } : { numberPlate }).populate('player property org');
             },
             records: async (_, { subject, type, take, skip }) => {
                 const query = { subject };
                 if (type) query.type = type;
-                const records = await mongoose.model('Record').find(query).limit(take).skip(skip);
-                const total = await mongoose.model('Record').countDocuments(query);
-                return { records, total };
+                const items = await Record.find(query).limit(take || 10).skip(skip || 0).populate('issuer subject');
+                const total = await Record.countDocuments(query);
+                return { records: items, total };
             }
         },
         Mutation: {
-            createOrganisation: async (_, { createOrganisationInput }) => {
-                const acct = await BankAccount.create({ balance: 0 });
-                return await Organisation.create({ ...createOrganisationInput, bankAccount: acct._id, created: new Date().toISOString() });
+            updatePlayer: async (_, { id, updatePlayerInput }) => {
+                return await Player.findByIdAndUpdate(id, updatePlayerInput, { new: true });
             },
             createVehicle: async (_, { createVehicleInput }) => {
                 return await Vehicle.create({ ...createVehicleInput, created: new Date().toISOString() });
-            },
-            updatePlayer: async (_, { id, updatePlayerInput }) => {
-                return await Player.findByIdAndUpdate(id, updatePlayerInput, { new: true });
             }
-            // Add other mutations similarly...
         }
     };
 
-    // 5. Auth Bypass
+    // 5. THE AUTHENTICATION ROUTE (Required to fix Roblox 404/Timeout)
     app.post('/auth/token', (req, res) => {
-        res.json({ token: "session_valid", jobId: req.body.jobId });
+        console.log(`Token issued for JobId: ${req.body.jobId}`);
+        res.status(200).json({
+            token: "authenticated_session", 
+            jobId: req.body.jobId || "studio"
+        });
     });
 
-    const server = new ApolloServer({ typeDefs, resolvers, introspection: true });
+    const server = new ApolloServer({ 
+        typeDefs, 
+        resolvers, 
+        introspection: true,
+        playground: true 
+    });
+
     await server.start();
     server.applyMiddleware({ app, path: '/graphql' });
 
     const PORT = process.env.PORT || 4000;
-    app.listen(PORT, () => console.log(`🚀 API running on port ${PORT}`));
+    app.listen(PORT, () => {
+        console.log(`🚀 API running on port ${PORT}`);
+        console.log(`🔗 GraphQL: http://localhost:${PORT}/graphql`);
+        console.log(`🔗 Auth: http://localhost:${PORT}/auth/token`);
+    });
 }
 
 startServer();
