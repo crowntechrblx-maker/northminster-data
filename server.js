@@ -226,6 +226,52 @@ app.use(async (req, res, next) => {
     next();
 });
 
+// A beautiful status page to check your API health
+app.get('/status', async (req, res) => {
+    const mongoState = mongoose.connection.readyState;
+    const states = {
+        0: "🔴 Disconnected",
+        1: "🟢 Connected",
+        2: "🟡 Connecting",
+        3: "🟠 Disconnecting"
+    };
+
+    const statusColor = mongoState === 1 ? "#00ff88" : "#ff4444";
+
+    res.send(`
+        <html>
+            <head>
+                <title>Northminster API Status</title>
+                <style>
+                    body { font-family: 'Segoe UI', sans-serif; background: #0b0e14; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                    .card { background: #161b22; padding: 2rem; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; width: 350px; }
+                    h1 { margin-top: 0; font-size: 1.5rem; color: #8b949e; }
+                    .status-dot { height: 15px; width: 15px; background-color: ${statusColor}; border-radius: 50%; display: inline-block; margin-right: 10px; box-shadow: 0 0 10px ${statusColor}; }
+                    .state-text { font-size: 1.2rem; font-weight: bold; }
+                    .info { margin-top: 20px; font-size: 0.9rem; color: #8b949e; border-top: 1px solid #30363d; padding-top: 20px; }
+                    .refresh { margin-top: 20px; display: inline-block; padding: 8px 16px; background: #238636; color: white; text-decoration: none; border-radius: 6px; font-size: 0.8rem; }
+                </style>
+                <meta http-equiv="refresh" content="30">
+            </head>
+            <body>
+                <div class="card">
+                    <h1>System Status</h1>
+                    <div style="display: flex; align-items: center; justify-content: center;">
+                        <span class="status-dot"></span>
+                        <span class="state-text">${states[mongoState] || "Unknown"}</span>
+                    </div>
+                    <div class="info">
+                        <p><strong>Endpoint:</strong> northminsterapi.jacobc.space</p>
+                        <p><strong>Database:</strong> MongoDB Atlas</p>
+                        <p><strong>Latency:</strong> Active</p>
+                    </div>
+                    <a href="/status" class="refresh">Refresh Status</a>
+                </div>
+            </body>
+        </html>
+    `);
+});
+
 // 7. EXPORT APP FOR VERCEL
 module.exports = app;
 
